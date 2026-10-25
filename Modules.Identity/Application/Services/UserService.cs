@@ -1,52 +1,75 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Modules.Identity.Application.DTOs;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Modules.Identity.Domain.Entities;
 using Modules.Identity.Infrastructure.Persistence;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Modules.Identity.Application.Services;
 
-public class UserService
+internal sealed class UserService(
+    UserManager<AppUser> userManager,
+    TokenService tokenService,
+    IdentityDbContext db)
 {
-    private readonly IdentityDbContext _context;
-
-    public UserService(IdentityDbContext context)
+    public async Task<LoginResult?> LoginAsync(
+        string email, string password, Guid tenantId, CancellationToken ct)
     {
-        _context = context;
+        var user = await userManager.Users
+            .FirstOrDefaultAsync(u => u.Email == email && u.TenantId == tenantId, ct);
+
+        if (user is null || !await userManager.CheckPasswordAsync(user, password))
+            return null;
+
+        return await IssueTokensAsync(user, ct);
     }
 
-    public async Task<(User? User, bool Conflict)> CreateAsync(
-        CreateUserRequest request,
-        CancellationToken cancellationToken)
+    public async Task<LoginResult?> RefreshAsync(string refreshToken, CancellationToken ct)
     {
-        var email = request.Email.Trim().ToLowerInvariant();
+        var hash = Convert.ToBase64String(
+            SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
 
-        var exists = await _context.Users
-            .AnyAsync(x => x.Email == email, cancellationToken);
+        var stored = await db.RefreshTokens
+            .FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
 
-        if (exists)
-            return (null, true);
+        if (stored is null || stored.RevokedAt is not null || stored.ExpiresAt < DateTime.UtcNow)
+            return null;
 
-        var user = new User
+        var user = await userManager.FindByIdAsync(stored.UserId.ToString());
+        if (user is null) return null;
+
+        stored.RevokedAt = DateTime.UtcNow;
+
+        var result = await IssueTokensAsync(user, ct);
+
+        stored.ReplacedById = result.RefreshTokenId;
+        await db.SaveChangesAsync(ct);
+
+        return result;
+    }
+
+    private async Task<LoginResult> IssueTokensAsync(AppUser user, CancellationToken ct)
+    {
+        var accessToken = tokenService.GenerateAccessToken(user);
+        var (raw, hash) = tokenService.GenerateRefreshToken();
+
+        var entity = new RefreshToken
         {
-            Email = email,
-            FullName = request.FullName.Trim()
+            UserId = user.Id,
+            TokenHash = hash,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
         };
 
-        _context.Users.Add(user);
+        db.RefreshTokens.Add(entity);
+        await db.SaveChangesAsync(ct);
 
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is Npgsql.PostgresException
-            {
-                SqlState: "23505"
-            })
-        {
-            return (null, true);
-        }
-
-        return (user, false);
+        var expiresAt = DateTime.UtcNow.AddMinutes(tokenService.AccessTokenExpiryMinutes);
+        return new LoginResult(accessToken, raw, entity.Id, expiresAt);
     }
 }
+
+internal record LoginResult(
+    string AccessToken,
+    string RefreshToken,
+    Guid RefreshTokenId,
+    DateTime ExpiresAt);

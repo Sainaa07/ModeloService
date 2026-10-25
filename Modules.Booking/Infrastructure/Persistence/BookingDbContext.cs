@@ -1,17 +1,14 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace Modules.Identity.Infrastructure.Persistence
+namespace Modules.Booking.Infrastructure.Persistence;
+
+internal class BookingDbContext : DbContext
 {
-    public class BookingDbContext : DbContext
+    public BookingDbContext(DbContextOptions<BookingDbContext> options) : base(options) { }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        public BookingDbContext(DbContextOptions<BookingDbContext> options) : base(options) { }
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            base.OnModelCreating(modelBuilder);
-            modelBuilder.HasDefaultSchema("booking");
-        }
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.HasDefaultSchema("booking");
     }
 }

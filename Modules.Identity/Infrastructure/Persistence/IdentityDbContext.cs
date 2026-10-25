@@ -1,33 +1,49 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Modules.Identity.Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using SharedKernel.Outbox;
 
-namespace Modules.Identity.Infrastructure.Persistence
+namespace Modules.Identity.Infrastructure.Persistence;
+
+internal class IdentityDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 {
-    public class IdentityDbContext : DbContext
+    public IdentityDbContext(DbContextOptions<IdentityDbContext> options) : base(options) { }
+
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantSettings> TenantSettings => Set<TenantSettings>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    protected override void OnModelCreating(ModelBuilder builder)
     {
-        public IdentityDbContext(DbContextOptions<IdentityDbContext> options) : base(options) { }
-        public DbSet<User> Users => Set<User>();
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        base.OnModelCreating(builder);
+        builder.HasDefaultSchema("identity");
+
+        builder.Entity<Tenant>(e =>
         {
-            base.OnModelCreating(modelBuilder);
-            modelBuilder.HasDefaultSchema("identity");
+            e.HasIndex(t => t.Slug).IsUnique();
+            e.HasIndex(t => t.CustomDomain)
+                .IsUnique()
+                .HasFilter("\"CustomDomain\" IS NOT NULL");
+        });
 
-            modelBuilder.Entity<User>(entity =>
-            {
-                entity.ToTable("users");
+        builder.Entity<TenantSettings>()
+            .HasKey(s => s.TenantId);
 
-                entity.Property(x => x.Email)
-                    .HasMaxLength(256);
+        builder.Entity<AppUser>(e =>
+        {
+            e.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
+        });
 
-                entity.HasIndex(x => x.Email)
-                    .IsUnique();
+        builder.Entity<RefreshToken>(e =>
+        {
+            e.HasIndex(t => t.TokenHash).IsUnique();
+        });
 
-                entity.Property(x => x.FullName)
-                    .HasMaxLength(200);
-            });
-        }
+        builder.Entity<OutboxMessage>(e =>
+        {
+            e.HasIndex(o => new { o.Status, o.NextAttemptAt });
+        });
     }
 }

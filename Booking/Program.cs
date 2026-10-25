@@ -1,39 +1,51 @@
+using Booking.Infrastructure.Swagger;
 using Modules.Booking;
 using Modules.Identity;
-using Modules.Identity.Infrastructure.Persistence;
+using Modules.Notifications;
+using SharedKernel.Tenancy;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
-// module registration
+// Modules
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddBookingModule(builder.Configuration);
 builder.Services.AddNotificationModule(builder.Configuration);
-//controllers
-builder.Services.AddControllers().AddApplicationPart(typeof(Modules.Identity.Controllers.UsersController).Assembly);//zalguulaad bichnee
-//swagger
+
+// Tenant context (scoped per request)
+builder.Services.AddScoped<ITenantContext, TenantContext>();
+
+// Controllers — бүх модулийн assembly нэмнэ
+builder.Services.AddControllers()
+    .AddApplicationPart(typeof(Modules.Identity.Controllers.PublicController).Assembly)
+    .AddApplicationPart(typeof(Modules.Booking.DependencyInjection).Assembly)
+    .AddApplicationPart(typeof(Modules.Notifications.DependencyInjection).Assembly);
+
+// OpenAPI / Swagger
+builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-//health checks
-builder.Services.AddHealthChecks()
-    .AddDbContextCheck<IdentityDbContext>("identity")
-    .AddDbContextCheck<BookingDbContext>("booking")
-    .AddDbContextCheck<NotificationsDbContext>("notifications");
+builder.Services.AddSwaggerGen(c =>
+    c.OperationFilter<TenantHeaderOperationFilter>());
+
+// Health check endpoint (модулиуд өөрсдийн DbContext-ийн check-ийг DI-дaa нэмсэн)
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope()) {
-    var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-    bool connected = await db.Database.CanConnectAsync();
-    Console.WriteLine(
-        connected
-            ? "PostgreSQL connected successfully!"
-            : "PostgreSQL connection failed!"
-    );
+// Dev: migration + seed
+if (app.Environment.IsDevelopment())
+{
+    await Modules.Identity.DependencyInjection.MigrateAndSeedAsync(app.Services);
+    await Modules.Booking.DependencyInjection.MigrateAsync(app.Services);
+    await Modules.Notifications.DependencyInjection.MigrateAsync(app.Services);
 }
 
-// Configure the HTTP request pipeline.
+// Middleware дараалал (PDF 9-р алхам)
+app.UseExceptionHandler("/error");
+app.UseHttpsRedirection();
+app.UseMiddleware<TenantResolutionMiddleware>();
+app.UseAuthentication();
+app.UseAuthorization();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -41,13 +53,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-//middleware
-app.UseHttpsRedirection();
-app.UseAuthorization();
-
-//endpoints
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-//run app
 app.Run();
+
+public partial class Program;
