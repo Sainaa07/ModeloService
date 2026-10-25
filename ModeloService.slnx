@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="Booking/Host.csproj" />
+  <Project Path="Modules.Booking.Contracts/Modules.Booking.Contracts.csproj" />
+  <Project Path="Modules.Booking/Modules.Booking.csproj" />
+  <Project Path="Modules.Identity.Contracts/Modules.Identity.Contracts.csproj" />
+  <Project Path="Modules.Identity/Modules.Identity.csproj" />
+  <Project Path="Modules.Notifications/Modules.Notifications.csproj" />
+  <Project Path="SharedKernel/SharedKernel.csproj" />
+  <Project Path="UnitTests/UnitTests.csproj" Id="c0c7d2e9-6e1d-4f40-967f-5e1b028bbdb3" />
+</Solution>
